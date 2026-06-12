@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>HTSBot</RootNamespace>
+    <AssemblyName>HTSBot</AssemblyName>
+    <!--
+      cTrader compiles cBots with its own build pipeline that already
+      references cAlgo.API.dll from the platform installation.
+
+      To develop and get IntelliSense outside of cTrader, point the
+      CTRADER_PATH environment variable at your cTrader installation
+      directory (e.g. C:\Program Files\cTrader) and add the DLLs below.
+
+      Example (PowerShell):
+        $env:CTRADER_PATH = "C:\Program Files\cTrader"
+        dotnet build
+
+      If CTRADER_PATH is not set the project still compiles inside cTrader.
+    -->
+  </PropertyGroup>
+
+  <!-- Local DLL references when building outside cTrader IDE -->
+  <ItemGroup Condition="'$(CTRADER_PATH)' != ''">
+    <Reference Include="cAlgo.API">
+      <HintPath>$(CTRADER_PATH)\cAlgo.API.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="cAlgo.API.Indicators">
+      <HintPath>$(CTRADER_PATH)\cAlgo.API.Indicators.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="cAlgo.API.Internals">
+      <HintPath>$(CTRADER_PATH)\cAlgo.API.Internals.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
