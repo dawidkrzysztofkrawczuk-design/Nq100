@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>cAlgo.Robots</RootNamespace>
+    <AssemblyName>HTSBot</AssemblyName>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!--
+      cTrader Automate ładuje cBota jako DLL skopiowaną do
+      %USERPROFILE%\Documents\cAlgo\Sources\Robots\HTSBot\.
+      W IDE cTrader tworzy własny projekt – ten .csproj służy do edycji
+      w Visual Studio / Rider i do CI poza cTraderem.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Oficjalny pakiet NuGet ze stubami cAlgo API (cTrader.Automate).
+      Wersja "*" zostanie zresolowana przy pierwszym `dotnet restore`.
+      Jeśli organizacja preferuje pinowanie wersji, zamień na konkretny numer
+      (np. "1.0.21" – aktualny w cTrader 5.x).
+    -->
+    <PackageReference Include="cTrader.Automate" Version="*" />
+  </ItemGroup>
+
+</Project>

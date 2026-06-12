@@ -1,0 +1,30 @@
+# =============== .NET / C# ===============
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.dll
+*.pdb
+*.exe
+
+# =============== Rider / VS / VSCode ===============
+.idea/
+.vs/
+.vscode/
+
+# =============== cTrader Automate ===============
+# Lokalne backupy/konfiguracje cTradera nie powinny trafiać do repo
+*.algo
+*.cbot
+*.bak
+
+# =============== Sekrety / dane lokalne ===============
+.env
+.env.*
+*.local
+
+# =============== Eksport bota ===============
+HTSBot_trades.csv
+*_trades.csv
