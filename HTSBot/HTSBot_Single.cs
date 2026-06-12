@@ -262,29 +262,35 @@ namespace cAlgo.Robots
         public Bars ExecutionBars { get; }
         public Bars HtfBars { get; }
 
+        // Wskaźniki tworzone są przez Robot (HTSBot.OnStart) i wstrzykiwane tutaj jako gotowce —
+        // dzięki temu klasa pomocnicza nie potrzebuje wiedzieć nic o IIndicatorsAccessor /
+        // IndicatorsAccessor (różne nazwy w różnych wersjach cAlgo API).
         public HTSIndicatorSet(
-            IIndicatorsAccessor indicators,
             Bars executionBars,
             Bars htfBars,
-            int fastEmaLength,
-            int slowEmaLength,
-            int trailEmaLength)
+            ExponentialMovingAverage fastHigh,
+            ExponentialMovingAverage fastLow,
+            ExponentialMovingAverage slowHigh,
+            ExponentialMovingAverage slowLow,
+            ExponentialMovingAverage htfFastHigh,
+            ExponentialMovingAverage htfFastLow,
+            ExponentialMovingAverage htfSlowHigh,
+            ExponentialMovingAverage htfSlowLow,
+            ExponentialMovingAverage trailHigh,
+            ExponentialMovingAverage trailLow)
         {
             ExecutionBars = executionBars;
             HtfBars = htfBars;
-
-            FastHigh = indicators.ExponentialMovingAverage(executionBars.HighPrices, fastEmaLength);
-            FastLow = indicators.ExponentialMovingAverage(executionBars.LowPrices, fastEmaLength);
-            SlowHigh = indicators.ExponentialMovingAverage(executionBars.HighPrices, slowEmaLength);
-            SlowLow = indicators.ExponentialMovingAverage(executionBars.LowPrices, slowEmaLength);
-
-            HtfFastHigh = indicators.ExponentialMovingAverage(htfBars.HighPrices, fastEmaLength);
-            HtfFastLow = indicators.ExponentialMovingAverage(htfBars.LowPrices, fastEmaLength);
-            HtfSlowHigh = indicators.ExponentialMovingAverage(htfBars.HighPrices, slowEmaLength);
-            HtfSlowLow = indicators.ExponentialMovingAverage(htfBars.LowPrices, slowEmaLength);
-
-            TrailHigh = indicators.ExponentialMovingAverage(executionBars.HighPrices, trailEmaLength);
-            TrailLow = indicators.ExponentialMovingAverage(executionBars.LowPrices, trailEmaLength);
+            FastHigh = fastHigh;
+            FastLow = fastLow;
+            SlowHigh = slowHigh;
+            SlowLow = slowLow;
+            HtfFastHigh = htfFastHigh;
+            HtfFastLow = htfFastLow;
+            HtfSlowHigh = htfSlowHigh;
+            HtfSlowLow = htfSlowLow;
+            TrailHigh = trailHigh;
+            TrailLow = trailLow;
         }
 
         public bool IsWarmedUp(int shift = 1)
@@ -600,13 +606,22 @@ namespace cAlgo.Robots
 
                 Bars htfBars = MarketData.GetBars(HTFTimeframe);
 
+                // Wskaźniki budujemy bezpośrednio w klasie Robot — `Indicators` jest tu dostępne
+                // jako property bazowej klasy Robot (cAlgo.API). Dzięki temu HTSIndicatorSet nie
+                // musi znać konkretnego typu akcesora (różny w różnych wersjach cAlgo API).
                 _indicators = new HTSIndicatorSet(
-                    Indicators,
-                    Bars,
-                    htfBars,
-                    FastEmaLength,
-                    SlowEmaLength,
-                    TrailEmaLength);
+                    executionBars: Bars,
+                    htfBars: htfBars,
+                    fastHigh: Indicators.ExponentialMovingAverage(Bars.HighPrices, FastEmaLength),
+                    fastLow: Indicators.ExponentialMovingAverage(Bars.LowPrices, FastEmaLength),
+                    slowHigh: Indicators.ExponentialMovingAverage(Bars.HighPrices, SlowEmaLength),
+                    slowLow: Indicators.ExponentialMovingAverage(Bars.LowPrices, SlowEmaLength),
+                    htfFastHigh: Indicators.ExponentialMovingAverage(htfBars.HighPrices, FastEmaLength),
+                    htfFastLow: Indicators.ExponentialMovingAverage(htfBars.LowPrices, FastEmaLength),
+                    htfSlowHigh: Indicators.ExponentialMovingAverage(htfBars.HighPrices, SlowEmaLength),
+                    htfSlowLow: Indicators.ExponentialMovingAverage(htfBars.LowPrices, SlowEmaLength),
+                    trailHigh: Indicators.ExponentialMovingAverage(Bars.HighPrices, TrailEmaLength),
+                    trailLow: Indicators.ExponentialMovingAverage(Bars.LowPrices, TrailEmaLength));
 
                 _signalEngine = new SignalEngine(
                     _indicators,

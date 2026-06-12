@@ -221,12 +221,18 @@ namespace cAlgo.Robots
                 Bars htfBars = MarketData.GetBars(HTFTimeframe);
 
                 _indicators = new HTSIndicatorSet(
-                    Indicators,
-                    Bars,
-                    htfBars,
-                    FastEmaLength,
-                    SlowEmaLength,
-                    TrailEmaLength);
+                    executionBars: Bars,
+                    htfBars: htfBars,
+                    fastHigh: Indicators.ExponentialMovingAverage(Bars.HighPrices, FastEmaLength),
+                    fastLow: Indicators.ExponentialMovingAverage(Bars.LowPrices, FastEmaLength),
+                    slowHigh: Indicators.ExponentialMovingAverage(Bars.HighPrices, SlowEmaLength),
+                    slowLow: Indicators.ExponentialMovingAverage(Bars.LowPrices, SlowEmaLength),
+                    htfFastHigh: Indicators.ExponentialMovingAverage(htfBars.HighPrices, FastEmaLength),
+                    htfFastLow: Indicators.ExponentialMovingAverage(htfBars.LowPrices, FastEmaLength),
+                    htfSlowHigh: Indicators.ExponentialMovingAverage(htfBars.HighPrices, SlowEmaLength),
+                    htfSlowLow: Indicators.ExponentialMovingAverage(htfBars.LowPrices, SlowEmaLength),
+                    trailHigh: Indicators.ExponentialMovingAverage(Bars.HighPrices, TrailEmaLength),
+                    trailLow: Indicators.ExponentialMovingAverage(Bars.LowPrices, TrailEmaLength));
 
                 _signalEngine = new SignalEngine(
                     _indicators,
