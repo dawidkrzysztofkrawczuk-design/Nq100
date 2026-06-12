@@ -1,18 +1,35 @@
 # PLAN BUDOWY — HTS RAW v2.6 cTrader cBot
-> Dokument specyfikacyjny dla developera / modelu AI.  
-> Platform: **cTrader** (cAlgo API, C#).  
+> Dokument specyfikacyjny dla developera / modelu AI.
+> Platforma: **cTrader** (cAlgo API, C#).
 > Strategia bazowa: wskaźnik **HTS RAW v2.6 – Precision Touch**.
+> Wszystkie wymagania potwierdzone przez właściciela projektu.
 
 ---
 
-## 1. CEL PROJEKTU
+## 1. ZATWIERDZONA SPECYFIKACJA (20 pytań)
 
-Zbudować w pełni autonomicznego bota dla platformy **cTrader**, który:
-- wchodzi w pozycje na **wykresie 1-minutowym** (M1)
-- filtruje trend z **wyższego interwału** (domyślnie M5, wybieralny)
-- implementuje **precyzyjny warunek dotyku wstęg EMA** (Precision Touch)
-- zarządza ryzykiem, Stop Lossem, Take Profitem i Trailing Stopem
-- szanuje godziny handlu i dzienne limity strat/zysku
+| # | Temat | Decyzja |
+|---|---|---|
+| 1 | Instrument | Wszystkie (Forex, Indeksy, Surowce, Krypto) |
+| 2 | Interwał wejść (execution TF) | Wybieralny w ustawieniach (M1/M5/M15/inne) |
+| 3 | Interwał trendu (HTF) | Wybieralny w ustawieniach |
+| 4 | Sygnały | Classic + Hook — każdy można osobno włączyć/wyłączyć |
+| 5 | Max pozycji jednocześnie | 1 pozycja naraz |
+| 6 | Nowy sygnał gdy pozycja otwarta | Wybór: ignoruj LUB powiększ (pyramiding) |
+| 7 | Stop Loss — typ | Wybór: stały $ LUB stały % |
+| 8 | Trailing Stop — start | Tylko gdy ręcznie włączony w ustawieniach |
+| 9 | Trailing Stop — EMA | Konfigurowalna długość EMA |
+| 10 | Take Profit — typ | Wybór: stały %, stały $, R:R ratio, brak TP, trailing only |
+| 11 | Partial Close | Konfigurowalne: ile % zamknąć + przy jakim TP |
+| 12 | Wielkość pozycji | % kapitału na trade (dynamiczne position sizing) |
+| 13 | Dzienny limit straty | Zamknij wszystkie pozycje + zatrzymaj bota na resztę dnia |
+| 14 | Dzienny cel zysku | Zamknij wszystkie pozycje + zatrzymaj bota na resztę dnia |
+| 15 | Godziny handlu | Dni tygodnia + godziny osobno na każdy dzień (Pon–Nd) |
+| 16 | Pozycja po godzinach | Wybór: zostaw otwartą LUB zamknij natychmiast |
+| 17 | Powiadomienia | Brak |
+| 18 | Panel na wykresie | Tak — dzienny P&L, status bota, liczba transakcji |
+| 19 | Backtest | Musi działać + eksport wyników do CSV |
+| 20 | Format pliku | Pliki .cs do cTrader IDE |
 
 ---
 
@@ -23,412 +40,475 @@ Zbudować w pełni autonomicznego bota dla platformy **cTrader**, który:
 | Platforma | cTrader (Spotware) |
 | Język | C# (.NET 6) |
 | API | cAlgo API (`using cAlgo.API;`) |
-| Klasa bazowa bota | `Robot` (z `cAlgo.API`) |
-| Parametry | Atrybut `[Parameter]` w klasie głównej |
-| Wskaźniki | `Robot.Indicators.ExponentialMovingAverage(source, periods)` |
+| Klasa bazowa bota | `Robot` |
+| Parametry | Atrybut `[Parameter]` |
+| Wskaźniki | `Robot.Indicators.ExponentialMovingAverage(source, period)` |
 | Wieloczasowość | `Robot.MarketData.GetBars(TimeFrame)` |
+| Panel na wykresie | `Chart.DrawStaticText(...)` |
+| Eksport CSV | `System.IO.File.AppendAllText(...)` |
 
 ---
 
-## 3. STRUKTURA KATALOGÓW
+## 3. STRUKTURA KATALOGÓW I PLIKÓW
 
 ```
 HTSBot/
 ├── HTSBot.csproj
-├── HTSBot.cs                    ← główna klasa [Robot] (Orchestrator)
+├── HTSBot.cs                       ← [Robot] Orchestrator
 ├── Models/
-│   ├── Enums.cs                 ← typy wyliczeniowe
-│   ├── TradeSignal.cs           ← model sygnału
-│   └── DailyStats.cs            ← statystyki dnia
+│   ├── Enums.cs                    ← typy wyliczeniowe
+│   ├── TradeSignal.cs              ← model sygnału
+│   ├── DailyStats.cs               ← statystyki dnia
+│   └── TradingSchedule.cs          ← harmonogram godzin (per dzień tygodnia)
 ├── Indicators/
-│   └── HTSIndicatorSet.cs       ← inicjalizacja wszystkich EMA
+│   └── HTSIndicatorSet.cs          ← inicjalizacja EMA
 ├── Strategy/
-│   └── SignalEngine.cs          ← logika sygnałów (HTS v2.6)
+│   └── SignalEngine.cs             ← logika HTS v2.6
 ├── Risk/
-│   └── RiskManager.cs           ← ryzyko, SL/TP, godziny, limity
-└── Execution/
-    └── ExecutionHandler.cs      ← otwieranie zleceń, trailing stop
+│   └── RiskManager.cs              ← ryzyko, SL/TP, partial close, limity
+├── Execution/
+│   └── ExecutionHandler.cs         ← zlecenia, trailing, zamykanie
+├── UI/
+│   └── ChartPanel.cs               ← panel informacyjny na wykresie
+└── Export/
+    └── CsvExporter.cs              ← eksport transakcji do CSV
 ```
-
-> **Zasada:** każdy plik = jedna klasa = jedna odpowiedzialność (SOLID).  
-> `HTSBot.cs` jest TYLKO orkiestratorem — nie zawiera żadnej logiki biznesowej.
 
 ---
 
-## 4. OPIS KAŻDEGO MODUŁU
+## 4. WSZYSTKIE PARAMETRY BOTA (z grupami)
 
-### 4.1 `Models/Enums.cs`
+### [EMA Settings]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| FastEmaLength | int | 66 | Okres szybkiej wstęgi EMA |
+| SlowEmaLength | int | 288 | Okres wolnej wstęgi EMA |
+| KijunLength | int | 26 | Lookback dla Kijun-Sen |
+| TrailEmaLength | int | 33 | Okres EMA dla trailing stop |
+
+### [Timeframes]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| HTFTimeframe | TimeFrame | Minute5 | Interwał filtra trendu |
+
+> Uwaga: execution TF jest ustawiany przez użytkownika podczas przypinania bota do wykresu — cTrader automatycznie używa TF wykresu jako `Bars`.
+
+### [Signal Settings]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| EnableClassicSignals | bool | true | Włącz sygnały Classic (z Kijun) |
+| EnableHookSignals | bool | true | Włącz sygnały Hook (bez Kijun) |
+| PyramidingMode | PyramidingMode | Disabled | Disabled / AddToWinner |
+
+### [Risk Management]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| RiskPercent | double | 1.0 | % kapitału na trade |
+| StopLossType | SLTPType | Percent | Dollar / Percent |
+| StopLossValue | double | 0.5 | Wartość SL w $ lub % |
+| TakeProfitType | TakeProfitMode | Percent | Percent / Dollar / RiskReward / None / TrailingOnly |
+| TakeProfitValue | double | 1.0 | Wartość TP |
+| RiskRewardRatio | double | 2.0 | Używany gdy TakeProfitType = RiskReward |
+
+### [Partial Close]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| EnablePartialClose | bool | false | Włącz częściowe zamykanie |
+| PartialClosePercent | double | 50.0 | % pozycji do zamknięcia (0–100) |
+| PartialCloseTpType | SLTPType | Percent | Typ TP1 dla partial close |
+| PartialCloseTpValue | double | 0.5 | Wartość TP1 dla partial close |
+
+### [Trailing Stop]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| EnableTrailingStop | bool | false | Włącz EMA trailing stop |
+
+### [Daily Limits]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| DailyLossLimit | double | 0 | Max strata dnia w $ (0=wyłączone) |
+| DailyProfitTargetDollar | double | 0 | Cel zysku w $ (0=wyłączone) |
+| DailyProfitTargetPercent | double | 0 | Cel zysku w % kapitału (0=wyłączone) |
+| ClosePositionsOnDailyLimit | bool | true | Zamknij pozycje gdy limit hit (zawsze true per spec) |
+
+### [Trading Hours — poniedziałek do niedzieli]
+Dla każdego dnia tygodnia (7×):
+
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| MondayEnabled | bool | true | Handel w poniedziałek |
+| MondayStartHour | int | 8 | Godzina start (UTC) |
+| MondayStartMinute | int | 0 | Minuta start |
+| MondayEndHour | int | 20 | Godzina koniec (UTC) |
+| MondayEndMinute | int | 0 | Minuta koniec |
+| ... (analogicznie Tue–Sun) | | | |
+
+### [After Hours]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| ClosePositionsAfterHours | bool | false | Zamknij pozycje gdy koniec godzin |
+
+### [Display]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| ShowChartPanel | bool | true | Wyświetl panel na wykresie |
+
+### [Export]
+| Parametr | Typ | Domyślnie | Opis |
+|---|---|---|---|
+| EnableCsvExport | bool | false | Eksportuj transakcje do CSV |
+| CsvFilePath | string | "HTSBot_trades.csv" | Ścieżka pliku CSV |
+
+---
+
+## 5. TYPY WYLICZENIOWE
 
 ```csharp
-public enum SignalType   { None, LongClassic, LongHook, ShortClassic, ShortHook }
+public enum SignalType
+{
+    None, LongClassic, LongHook, ShortClassic, ShortHook
+}
+
 public enum TradeDirection { Long, Short }
-public enum SLTPType     { Dollar, Percent }
-public enum SignalFilter  { Both, ClassicOnly, HookOnly }
+
+public enum SLTPType { Dollar, Percent }
+
+public enum TakeProfitMode
+{
+    Percent,       // stały % od wejścia
+    Dollar,        // stały $ od wejścia
+    RiskReward,    // R:R ratio × SL distance
+    None,          // brak TP (tylko SL/trailing)
+    TrailingOnly   // brak stałego TP, trailing zamknie pozycję
+}
+
+public enum PyramidingMode { Disabled, AddToWinner }
 ```
 
 ---
 
-### 4.2 `Models/TradeSignal.cs`
+## 6. LOGIKA SYGNAŁÓW (HTS RAW v2.6 → C#)
 
-Niezmienny (immutable) snapshot sygnału:
+### 6.1 Definicje wskaźników
 
-| Właściwość | Typ | Opis |
-|---|---|---|
-| `Type` | `SignalType` | Typ sygnału |
-| `Direction` | `TradeDirection` | Long / Short |
-| `EntryPrice` | `double` | Close baru sygnałowego |
-| `FastBandHigh` | `double` | Górna krawędź szybkiej wstęgi (fH) |
-| `FastBandLow` | `double` | Dolna krawędź szybkiej wstęgi (fL) |
-| `IsValid` | `bool` | `Type != None` |
+```
+fH = EMA(high, fastLen)   → ind.FastHigh.Result.Last(1)
+fL = EMA(low,  fastLen)   → ind.FastLow.Result.Last(1)
+sH = EMA(high, slowLen)   → ind.SlowHigh.Result.Last(1)
+sL = EMA(low,  slowLen)   → ind.SlowLow.Result.Last(1)
 
-Metoda statyczna: `TradeSignal.NoSignal()` → zwraca sentinel bez sygnału.
+kj = (Highest(high, kLen) + Lowest(low, kLen)) / 2
+   → pętla Last(1)..Last(kLen) przez bars.HighPrices i bars.LowPrices
+
+HTF trend:
+  htfFastHigh = ind.HtfFastHigh.Result.Last(1)
+  htfFastLow  = ind.HtfFastLow.Result.Last(1)
+  htfSlowHigh = ind.HtfSlowHigh.Result.Last(1)
+  htfSlowLow  = ind.HtfSlowLow.Result.Last(1)
+```
+
+### 6.2 Warunki trendu
+
+```
+isBull = htfFastLow  > htfSlowHigh    // HTF: szybka wstęga całkowicie nad wolną
+isBear = htfFastHigh < htfSlowLow     // HTF: szybka wstęga całkowicie pod wolną
+```
+
+### 6.3 Warunek precyzyjnego dotyku (Precision Touch)
+
+```
+LONG:
+  barLow  <= fH          // knot wchodzi w wstęgę od góry
+  barLow  >= fL          // ale nie przebija wstęgi na wylot
+  barClose > fH          // zamknięcie POWYŻEJ górnej krawędzi wstęgi
+
+SHORT:
+  barHigh >= fL          // knot wchodzi w wstęgę od dołu
+  barHigh <= fH          // ale nie przebija wstęgi na wylot
+  barClose < fL          // zamknięcie PONIŻEJ dolnej krawędzi wstęgi
+```
+
+### 6.4 Klasyfikacja sygnałów
+
+```
+longClassic  = isBull AND barClose > kj AND validTouchLong
+shortClassic = isBear AND barClose < kj AND validTouchShort
+longHook     = isBull AND barClose < kj AND validTouchLong
+shortHook    = isBear AND barClose > kj AND validTouchShort
+```
+
+### 6.5 Filtrowanie
+
+```
+if !EnableClassicSignals → longClassic = shortClassic = false
+if !EnableHookSignals    → longHook    = shortHook    = false
+```
 
 ---
 
-### 4.3 `Models/DailyStats.cs`
+## 7. POSITION SIZING I SL/TP
 
-| Właściwość | Typ | Opis |
-|---|---|---|
-| `Date` | `DateTime` | Data UTC bieżącego dnia |
-| `RealizedPnL` | `double` | Skumulowany P&L zamkniętych pozycji |
-| `IsTradingHalted` | `bool` | Flaga zatrzymania na dany dzień |
-
-Metody:
-- `Reset()` — zeruje P&L i flagę, ustawia nową datę
-- `IsNewDay(DateTime)` — porównuje datę UTC
-
----
-
-### 4.4 `Indicators/HTSIndicatorSet.cs`
-
-Inicjalizuje w konstruktorze **10 wskaźników EMA** przez `robot.Indicators.ExponentialMovingAverage(source, period)`:
-
-| Nazwa pola | Źródło | Okres | Cel |
-|---|---|---|---|
-| `FastHigh` | exec high | fastLen | Górna krawędź szybkiej wstęgi |
-| `FastLow` | exec low | fastLen | Dolna krawędź szybkiej wstęgi |
-| `SlowHigh` | exec high | slowLen | Górna krawędź wolnej wstęgi |
-| `SlowLow` | exec low | slowLen | Dolna krawędź wolnej wstęgi |
-| `HtfFastHigh` | HTF high | fastLen | HTF trend filter |
-| `HtfFastLow` | HTF low | fastLen | HTF trend filter |
-| `HtfSlowHigh` | HTF high | slowLen | HTF trend filter |
-| `HtfSlowLow` | HTF low | slowLen | HTF trend filter |
-| `TrailHigh` | exec high | trailLen | Trailing SL dla Short |
-| `TrailLow` | exec low | trailLen | Trailing SL dla Long |
-
-Konstruktor przyjmuje: `(Robot robot, Bars execBars, Bars htfBars, int fastLen, int slowLen, int trailLen)`
-
----
-
-### 4.5 `Strategy/SignalEngine.cs`
-
-**Tłumaczenie Pine Script → C#:**
+### 7.1 Obliczenie SL (ceny)
 
 ```
-Pine Script                         C# (Last(1) = last closed bar)
-───────────────────────────────────────────────────────────────────
-fH = ema(high, eFastLen)         →  ind.FastHigh.Result.Last(1)
-fL = ema(low,  eFastLen)         →  ind.FastLow.Result.Last(1)
-sH = ema(high, eSlowLen)         →  ind.SlowHigh.Result.Last(1)
-sL = ema(low,  eSlowLen)         →  ind.SlowLow.Result.Last(1)
-
-kj = (highest(high,kLen)
-     +lowest(low,kLen)) / 2      →  CalculateKijun() — pętla Last(1..kLen)
-
-isBull = fL > sH                 →  IsBullTrend()
-  + MTF: htfFastLow > htfSlowHigh
-
-isBear = fH < sL                 →  IsBearTrend()
-  + MTF: htfFastHigh < htfSlowLow
-
-validTouchLong  = low<=fH        →  barLow <= fH
-               AND low>=fL       →  AND barLow >= fL
-               AND close>fH      →  AND barClose > fH
-
-validTouchShort = high>=fL       →  barHigh >= fL
-               AND high<=fH      →  AND barHigh <= fH
-               AND close<fL      →  AND barClose < fL
-
-longClassic  = isBull AND close>kj AND validTouchLong
-shortClassic = isBear AND close<kj AND validTouchShort
-longHook     = isBull AND close<kj AND validTouchLong
-shortHook    = isBear AND close>kj AND validTouchShort
-```
-
-**Priorytet zwracania** (jeśli kilka prawd jednocześnie): Classic > Hook.
-
-**Metoda publiczna:** `TradeSignal GetSignal()` — wywołać z `OnBar()`.
-
----
-
-### 4.6 `Risk/RiskManager.cs`
-
-#### A. Sprawdzenie godzin handlu
-```
-startMinutes = StartHour * 60 + StartMinute
-endMinutes   = EndHour   * 60 + EndMinute
-nowMinutes   = serverTime.Hour * 60 + serverTime.Minute
-
-if startMinutes <= endMinutes:
-    return nowMinutes >= startMinutes AND nowMinutes < endMinutes
-else (sesja przez północ):
-    return nowMinutes >= startMinutes OR nowMinutes < endMinutes
-```
-
-#### B. Sprawdzenie limitów dziennych
-```
-if DailyLossLimit > 0 AND RealizedPnL <= -DailyLossLimit  → HALT
-if DailyProfitTargetDollar > 0 AND RealizedPnL >= DailyProfitTargetDollar → HALT
-if DailyProfitTargetPercent > 0:
-    target = Balance * (DailyProfitTargetPercent / 100)
-    if RealizedPnL >= target → HALT
-```
-
-#### C. Obliczenie ceny Stop Lossa
-
-```
-Tryb Dollar:
-  SL_dist = StopLossValue × TickSize / (VolumeInUnitsStep × TickValue)
-  // Interpretacja: dla minimalnego stepа wolumenu, SL oddala się o StopLossValue $
-
 Tryb Percent:
-  SL_dist = EntryPrice × (StopLossValue / 100)
+  slDist = entryPrice × (StopLossValue / 100)
 
-Cena SL dla Long  = EntryPrice - SL_dist
-Cena SL dla Short = EntryPrice + SL_dist
+Tryb Dollar:
+  slDist = StopLossValue × TickSize / (VolumeInUnitsStep × TickValue)
+
+slPrice (Long)  = entryPrice - slDist
+slPrice (Short) = entryPrice + slDist
 ```
 
-#### D. Obliczenie ceny Take Profita
-Identycznie jak SL, ale dodajemy/odejmujemy w przeciwnym kierunku.
-
-#### E. Wielkość pozycji (Position Sizing)
-```
-RiskAmount = Balance × (RiskPercent / 100)
-PriceValuePerUnit = TickValue / TickSize
-Volume = RiskAmount / (SL_dist × PriceValuePerUnit)
-
-Normalizacja:
-  Volume = floor(Volume / VolumeInUnitsStep) × VolumeInUnitsStep
-  Volume = clamp(Volume, VolumeInUnitsMin, VolumeInUnitsMax)
-```
-
-> **Zaokrąglenie w DÓŁ** (`floor`) — nigdy nie ryzykować więcej niż zakładane %.
-
----
-
-### 4.7 `Execution/ExecutionHandler.cs`
-
-#### A. Otwieranie pozycji (`OpenPosition`)
-```
-refPrice  = Ask (dla Buy) / Bid (dla Sell)   // cena rynkowa, nie close baru
-slPrice   = riskManager.CalculateStopLossPrice(direction, refPrice)
-tpPrice   = riskManager.CalculateTakeProfitPrice(direction, refPrice)
-volume    = riskManager.CalculateVolume(refPrice, slPrice)
-slPips    = Abs(refPrice - slPrice) / Symbol.PipSize
-tpPips    = Abs(refPrice - tpPrice) / Symbol.PipSize
-
-ExecuteMarketOrder(tradeType, Symbol.Name, volume, BotLabel, slPips, tpPips, comment)
-```
-
-> SL/TP przekazywane jako **pipy** (liczba dodatnia = odległość od ceny wejścia).
-> Broker egzekwuje je na poziomie zlecenia.
-
-#### B. Trailing Stop (`UpdateTrailingStop`)
-```
-Dla każdej pozycji z etykietą BotLabel:
-
-  LONG:
-    newSL = ind.TrailLow.Result.Last(1)   // EMA(low, trailLen)
-    if position.StopLoss != null AND newSL <= currentSL → pomiń (nie cofaj SL)
-    else → ModifyPosition(position, newSL, position.TakeProfit)
-
-  SHORT:
-    newSL = ind.TrailHigh.Result.Last(1)  // EMA(high, trailLen)
-    if position.StopLoss != null AND newSL >= currentSL → pomiń
-    else → ModifyPosition(position, newSL, position.TakeProfit)
-```
-
-`ModifyPosition` przyjmuje **absolutne ceny** (nie pipy).
-
-#### C. Zamykanie awaryjne (`CloseAllPositions`)
-Zamknij wszystkie pozycje z etykietą BotLabel. Wywołać na żądanie lub w `OnStop()`.
-
----
-
-### 4.8 `HTSBot.cs` — Orkiestrator
-
-#### Wszystkie parametry (z grupami i wartościami domyślnymi):
+### 7.2 Obliczenie TP (ceny)
 
 ```
-[EMA Settings]
-  FastEmaLength       int     66
-  SlowEmaLength       int     288
-  KijunLength         int     26
+Tryb Percent:    tpDist = entryPrice × (TakeProfitValue / 100)
+Tryb Dollar:     tpDist = TakeProfitValue × TickSize / (VolumeInUnitsStep × TickValue)
+Tryb RiskReward: tpDist = slDist × RiskRewardRatio
+Tryb None/TrailingOnly: tpPrice = null
 
-[Trend Filter]
-  EnableMTF           bool    true
-  HTFTimeframe        TimeFrame  Minute5
-
-[Signal Settings]
-  AllowedSignals      SignalFilter  Both
-
-[Risk Management]
-  RiskPercent         double  1.0   (min 0.01, max 100)
-  StopLossType        SLTPType  Percent
-  StopLossValue       double  0.5   (min 0.001)
-  TakeProfitType      SLTPType  Percent
-  TakeProfitValue     double  1.0   (min 0.001)
-
-[Trailing Stop]
-  EnableTrailingStop  bool    false
-  TrailEmaLength      int     33    (min 2, max 500)
-
-[Trading Hours]
-  TradingStartHour    int     8     (0-23)
-  TradingStartMinute  int     0     (0-59)
-  TradingEndHour      int     20    (0-23)
-  TradingEndMinute    int     0     (0-59)
-
-[Daily Limits]
-  DailyLossLimit           double  0  (0=disabled)
-  DailyProfitTargetDollar  double  0  (0=disabled)
-  DailyProfitTargetPercent double  0  (0=disabled)
+tpPrice (Long)  = entryPrice + tpDist
+tpPrice (Short) = entryPrice - tpDist
 ```
 
-#### Metody lifecycle:
+### 7.3 Wielkość pozycji
 
-**`OnStart()`**
 ```
-1. Utwórz DailyStats
-2. Załaduj _htfBars = MarketData.GetBars(HTFTimeframe)
-3. Utwórz HTSIndicatorSet(this, Bars, _htfBars, FastEmaLength, SlowEmaLength, TrailEmaLength)
-4. Utwórz SignalEngine(indicators, Bars, _htfBars, KijunLength, EnableMTF, AllowedSignals)
-5. Utwórz RiskManager(this, dailyStats) → przypisz wszystkie parametry ryzyka
-6. Utwórz ExecutionHandler(this, riskManager, "HTS_BOT", EnableTrailingStop, indicators)
-7. Subskrybuj Positions.Closed += OnPositionClosed
+riskAmount       = Account.Balance × (RiskPercent / 100)
+priceValuePerUnit = TickValue / TickSize
+volume           = riskAmount / (slDist × priceValuePerUnit)
+volume           = floor(volume / VolumeInUnitsStep) × VolumeInUnitsStep
+volume           = clamp(volume, VolumeInUnitsMin, VolumeInUnitsMax)
 ```
 
-**`OnBar()`** (wywoływana przy zamknięciu każdego baru M1)
-```
-1. if dailyStats.IsNewDay(Server.Time) → dailyStats.Reset()
-2. if !riskManager.IsWithinTradingHours(Server.Time) → return
-3. if !riskManager.IsTradingAllowed() → return
-4. if Positions.Any(p => p.Label == "HTS_BOT"):
-     executionHandler.UpdateTrailingStop()
-     return  ← tylko 1 pozycja naraz
-5. signal = signalEngine.GetSignal()
-6. if !signal.IsValid → return
-7. executionHandler.OpenPosition(signal)
-```
+### 7.4 Partial Close
 
-**`OnTick()`**
 ```
-if !EnableTrailingStop → return
-if !Positions.Any(p => p.Label == "HTS_BOT") → return
-executionHandler.UpdateTrailingStop()
-```
+if EnablePartialClose AND !position.PartialCloseDone:
+  tp1Dist  = oblicz jak wyżej dla PartialCloseTpType/Value
+  tp1Price = entryPrice ± tp1Dist
 
-**`OnStop()`**
-```
-Zaloguj: "Stopped, Daily P&L: {dailyStats.RealizedPnL}"
-Odsubskrybuj Positions.Closed
-```
-
-**`OnPositionClosed(PositionClosedEventArgs args)`**
-```
-if args.Position.Label != "HTS_BOT" → return
-riskManager.UpdateDailyPnL(args.Position.GrossProfit)
-Zaloguj P&L i daily total
+  if (Long  AND currentPrice >= tp1Price) OR
+     (Short AND currentPrice <= tp1Price):
+    volumeToClose = position.VolumeInUnits × (PartialClosePercent / 100)
+    ClosePosition(position, volumeToClose)
+    position.PartialCloseDone = true
+    przesuń SL na breakeven (entryPrice)
 ```
 
 ---
 
-## 5. SCHEMAT PRZEPŁYWU (FLOWCHART)
+## 8. TRAILING STOP
 
 ```
-[Nowy bar M1 zamknięty]
-         │
-         ▼
-[Czy nowy dzień UTC?] ──TAK──► Reset DailyStats
-         │
-         ▼
-[Czy w godzinach handlu?] ──NIE──► return
-         │
-         ▼
-[Czy nie przekroczono limitu dziennego?] ──NIE──► return (HALT)
-         │
-         ▼
-[Czy jest otwarta pozycja HTS_BOT?] ──TAK──► UpdateTrailingStop() → return
-         │ NIE
-         ▼
-[SignalEngine.GetSignal()]
-         │
-    ┌────┴────┐
-  Brak      Signal
- sygnału   ┌──────────────────────┐
-    │       │ • Oblicz SL/TP ceny  │
-  return   │ • Oblicz Volume       │
-           │ • ExecuteMarketOrder  │
-           └──────────────────────┘
+Wywołanie: OnTick() lub OnBar() gdy EnableTrailingStop = true
 
-[OnTick — równolegle]
-  if EnableTrailingStop → UpdateTrailingStop()
+LONG:
+  newSL = ind.TrailLow.Result.Last(1)    // EMA(low, TrailEmaLength)
+  if newSL > position.StopLoss:          // tylko w górę
+    ModifyPosition(position, newSL, position.TakeProfit)
 
-[OnPositionClosed]
-  UpdateDailyPnL(GrossProfit)
+SHORT:
+  newSL = ind.TrailHigh.Result.Last(1)   // EMA(high, TrailEmaLength)
+  if newSL < position.StopLoss:          // tylko w dół
+    ModifyPosition(position, newSL, position.TakeProfit)
+```
+
+> `ModifyPosition` przyjmuje **absolutne ceny**, nie pipy.
+
+---
+
+## 9. GODZINY HANDLU (per dzień tygodnia)
+
+```
+Dla bieżącego dnia UTC (DayOfWeek):
+  1. Sprawdź czy dzień jest włączony (MondayEnabled, TuesdayEnabled, ...)
+  2. Oblicz: nowMin = hour*60+min, startMin, endMin
+  3. if startMin <= endMin:
+       return nowMin >= startMin AND nowMin < endMin
+     else (sesja przez północ):
+       return nowMin >= startMin OR nowMin < endMin
+
+Po godzinach:
+  if ClosePositionsAfterHours AND !IsWithinTradingHours:
+    ExecutionHandler.CloseAllPositions("After hours")
 ```
 
 ---
 
-## 6. KLUCZOWE ZASADY PISANIA KODU
+## 10. LIMITY DZIENNE
 
-1. **Typowanie** — C# z `Nullable enable`, wszystkie właściwości z typami
-2. **Docstringi** — każda klasa i publiczna metoda ma `/// <summary>`
-3. **Logowanie** — każde istotne zdarzenie przez `robot.Print()` z prefiksem `[NazwaKlasy]`
-4. **Fail-safe** — sprawdzaj `TradeResult.IsSuccessful` po każdym `ExecuteMarketOrder` i `ModifyPosition`
-5. **Jedna pozycja** — bot nie otwiera nowej pozycji dopóki poprzednia nie zostanie zamknięta
-6. **Brak hardkodowanych kluczy** — wszystko przez parametry `[Parameter]` cTradera
-7. **Volume round DOWN** — zaokrąglaj `Math.Floor`, nie `Math.Round`
-8. **Trailing tylko w korzystnym kierunku** — SL dla Long może tylko rosnąć, dla Short tylko maleć
+```
+OnPositionClosed:
+  dailyStats.RealizedPnL += position.GrossProfit
+  CheckDailyLimits()
 
----
+CheckDailyLimits():
+  if DailyLossLimit > 0 AND RealizedPnL <= -DailyLossLimit:
+    HALT + CloseAllPositions("Daily loss limit")
 
-## 7. INSTALACJA W CTRADER
+  if DailyProfitTargetDollar > 0 AND RealizedPnL >= DailyProfitTargetDollar:
+    HALT + CloseAllPositions("Daily profit target $")
 
-1. Otwórz cTrader → **Automate** → **New cBot**
-2. Odtwórz strukturę folderów: `Models/`, `Indicators/`, `Strategy/`, `Risk/`, `Execution/`
-3. Wklej każdy plik `.cs` do odpowiedniego folderu
-4. Kliknij **Build** — cTrader kompiluje wszystko automatycznie
-5. Dołącz bota do wykresu **M1** i ustaw parametry w panelu
+  if DailyProfitTargetPercent > 0:
+    target = Balance × (DailyProfitTargetPercent / 100)
+    if RealizedPnL >= target:
+      HALT + CloseAllPositions("Daily profit target %")
+```
 
----
-
-## 8. CO JESZCZE MOŻNA DODAĆ (BACKLOG)
-
-- [ ] Maksymalna liczba pozycji dziennie
-- [ ] Filtr dni tygodnia (np. brak handlu w piątek po 20:00)
-- [ ] News filter (blokada X minut przed/po newsach)
-- [ ] Breakeven (przesuń SL na BE po osiągnięciu X% zysku)
-- [ ] Powiadomienia Telegram/e-mail po otwarciu/zamknięciu pozycji
-- [ ] Panel informacyjny na wykresie (Chart.DrawText)
-- [ ] Backtesting raport eksport CSV
+> Kluczowa różnica od poprzedniej wersji: **zamknij istniejące pozycje** (nie tylko zatrzymaj nowe).
 
 ---
 
-## 9. WERYFIKACJA ZROZUMIENIA STRATEGII
+## 11. PANEL NA WYKRESIE (ChartPanel)
 
-| Pytanie | Odpowiedź |
-|---|---|
-| Rynek | Forex/CFD na cTrader (np. EURUSD, NAS100, XAGUSD) |
-| API | cTrader cAlgo (C#) |
-| Timeframe wejść | M1 (1 minuta) |
-| Timeframe trendu | M5 domyślnie (wybieralny) |
-| Strategia | HTS RAW v2.6 — EMA bands precision touch |
-| Wejście Long | Bar dotyka dolnej części szybkiej wstęgi od góry + zamknięcie powyżej górnej krawędzi |
-| Wejście Short | Bar dotyka górnej części szybkiej wstęgi od dołu + zamknięcie poniżej dolnej krawędzi |
-| Classic vs Hook | Classic = z potwierdzeniem Kijun; Hook = przeciwko Kijun |
-| Stop Loss | Poniżej szybkiej wstęgi (trailing) lub stały % / $ od wejścia |
-| Trailing SL | Podąża za EMA(low/high, 33) — tylko w korzystnym kierunku |
-| Take Profit | % lub $ od ceny wejścia |
-| Ryzyko | % kapitału na trade — dynamiczne pozycjonowanie |
-| Język | C# (nie Python — cTrader wymaga C#) |
+Wyświetlany w lewym górnym rogu wykresu przez `Chart.DrawStaticText`.
+Aktualizowany w `OnBar()` i `OnTick()`.
+
+```
+┌─────────────────────────────┐
+│ HTS RAW v2.6 Bot            │
+│ Status: AKTYWNY / ZATRZYMANY│
+│ Dzienny P&L: +$125.50       │
+│ Transakcje dziś: 3          │
+│ Otwarta pozycja: Long M1    │
+│ Godziny: 08:00 – 20:00 UTC  │
+└─────────────────────────────┘
+```
+
+---
+
+## 12. EKSPORT CSV (CsvExporter)
+
+Plik tworzony/dołączany przy każdym zamknięciu pozycji.
+
+### Nagłówek CSV:
+```
+Date,Time,Symbol,Direction,SignalType,Volume,EntryPrice,ExitPrice,StopLoss,TakeProfit,PnL,DailyPnL
+```
+
+### Logika:
+```
+OnPositionClosed:
+  if EnableCsvExport:
+    wiersz = Format(position, signalType, dailyPnL)
+    File.AppendAllText(CsvFilePath, wiersz)
+```
+
+---
+
+## 13. FLOW DIAGRAMU OnBar()
+
+```
+[Bar zamknięty]
+      │
+      ▼
+[Nowy dzień UTC?] ──TAK──► Reset DailyStats
+      │
+      ▼
+[Czy dzień tygodnia włączony?] ──NIE──► return
+      │
+      ▼
+[Czy w godzinach handlu?] ──NIE──► [ClosePositionsAfterHours?] → zamknij/zostaw → return
+      │
+      ▼
+[IsTradingHalted?] ──TAK──► return
+      │
+      ▼
+[Otwarta pozycja HTS_BOT?]
+      │
+    TAK─────────────────────────────────────────────┐
+      │ NIE                                          ▼
+      ▼                               [UpdateTrailingStop()]
+[GetSignal()]                         [CheckPartialClose()]
+      │                                              │
+  Brak──► return                              return
+      │
+  Sygnał
+      │
+      ▼
+[CalculateSL / CalculateTP / CalculateVolume]
+      │
+      ▼
+[ExecuteMarketOrder]
+      │
+      ▼
+[Loguj + UpdateCsvExport + UpdatePanel]
+```
+
+---
+
+## 14. MODUŁ `TradingSchedule`
+
+Przechowuje harmonogram godzin dla każdego dnia tygodnia.
+
+```csharp
+public class DaySchedule
+{
+    public bool   Enabled     { get; set; }
+    public int    StartHour   { get; set; }
+    public int    StartMinute { get; set; }
+    public int    EndHour     { get; set; }
+    public int    EndMinute   { get; set; }
+}
+
+public class TradingSchedule
+{
+    public DaySchedule Monday    { get; set; }
+    public DaySchedule Tuesday   { get; set; }
+    public DaySchedule Wednesday { get; set; }
+    public DaySchedule Thursday  { get; set; }
+    public DaySchedule Friday    { get; set; }
+    public DaySchedule Saturday  { get; set; }
+    public DaySchedule Sunday    { get; set; }
+
+    public bool IsWithinSchedule(DateTime utcTime) { ... }
+}
+```
+
+---
+
+## 15. ZASADY PISANIA KODU
+
+1. **C# .NET 6**, `Nullable enable`, pełne Type Hints
+2. **Docstringi** `/// <summary>` na każdej klasie i publicznej metodzie
+3. **Logowanie** przez `robot.Print("[Klasa] komunikat")`
+4. **Fail-safe**: sprawdzaj `TradeResult.IsSuccessful` po każdym zleceniu
+5. **Jedna pozycja naraz** — sprawdzaj `Positions.Any(p => p.Label == "HTS_BOT")`
+6. **Volume zaokrąglaj w DÓŁ** (`Math.Floor`) — nigdy nie ryzykuj więcej niż zakładane %
+7. **Trailing tylko w korzystnym kierunku** — SL dla Long tylko rośnie, dla Short tylko maleje
+8. **Żadnych hardkodowanych wartości** — wszystko przez `[Parameter]`
+9. **Partial close** śledź flagą na pozycji (komentarz lub słownik)
+10. **CSV** — zapis przez `System.IO.File.AppendAllText`, obsłuż `IOException`
+
+---
+
+## 16. KOLEJNOŚĆ BUDOWANIA (moduł po module)
+
+```
+Iteracja 1: Szkielet + sygnały
+  → Models/ + Indicators/ + Strategy/SignalEngine.cs
+  → Test: czy sygnały pojawiają się w backtest na M1?
+
+Iteracja 2: Ryzyko + wykonanie
+  → Risk/RiskManager.cs + Execution/ExecutionHandler.cs
+  → Test: czy pozycje otwierają się z prawidłowym SL/TP?
+
+Iteracja 3: Trailing + Partial Close
+  → Rozbudowa ExecutionHandler + RiskManager
+  → Test: czy SL przesuwa się prawidłowo?
+
+Iteracja 4: Godziny + Limity dzienne
+  → Models/TradingSchedule.cs + rozbudowa RiskManager
+  → Test: czy bot zatrzymuje się i zamyka pozycje?
+
+Iteracja 5: Panel + CSV
+  → UI/ChartPanel.cs + Export/CsvExporter.cs
+  → Test: czy panel wyświetla aktualne dane?
+
+Iteracja 6: Backtest + kalibracja
+  → Pełny test na historycznych danych
+  → Weryfikacja position sizing na różnych instrumentach
+```
